@@ -1,4 +1,5 @@
 import os
+import datetime
 
 from cs50 import SQL
 from flask import Flask, flash, redirect, render_template, request, session
@@ -40,14 +41,85 @@ db = SQL("sqlite:///finance.db")
 @login_required
 def index():
     """Show portfolio of stocks"""
-    return apology("TODO")
+
+    # Get user_id from session
+    userid = session["user_id"]
+
+    # Query database from users table for username and declare variable to hold username
+    rows = db.execute("SELECT * FROM users WHERE id = :id", id=userid)
+    user_name = rows[0]["username"]
+    # Query data from "portfolio" table
+    portfolio_list = db.execute("SELECT username, symbol, SUM(shares) AS total_shares, price\
+                        FROM history GROUP BY username, symbol HAVING username = :username",
+                        username=user_name)
+
+    # Iterate over each dict_item in portfolio_list
+    # Select "symbol" for key and use lookup() to get stock_name
+    # Add stock_name and total_value to dict_item in portfolio_list
+    for dict_item in portfolio_list[:]:
+        for key, value in dict_item.items():
+                symbol = dict_item.get("symbol")
+                name = lookup(symbol)
+                name = name.get("name")
+                total_value = usd(dict_item.get("total_shares") * dict_item.get("price"))
+        dict_item.update({"stock_name": name, "total_value": total_value})
+
+    return render_template("index.html", portfolio_list=portfolio_list, cash=rows[0]["cash"])
 
 
-# @app.route("/buy", methods=["GET", "POST"])
-# @login_required
-# def buy():
-#     """Buy shares of stock"""
-#     return apology("TODO")
+@app.route("/buy", methods=["GET", "POST"])
+@login_required
+def buy():
+    """Buy shares of stock"""
+    # User reached route via GET (as by clicking a link or via redirect)
+    # Render buy.html for user to input "symbol" and "shares"
+    if request.method == "GET":
+        return render_template("buy.html")
+
+    else:
+        # Use lookup() in helpers.py to look up stock price using symbol
+        # Declare variable to hold "price" and "symbol" for later use
+        quote_dict = lookup(request.form.get("symbol"))
+        stock_price = quote_dict["price"]
+        stock_symbol = quote_dict["symbol"]
+
+        # Declare variable to hold number of shares passed by user
+        total_shares = int(request.form.get("shares"))
+
+        # Get user_id from session
+        userid = session["user_id"]
+
+        # Check for invalid symbol and return apology
+        if not quote_dict:
+            return apology("incorrect symbol", 403)
+            return redirect("/buy")
+        # If symbol is valid, check if user has enough money in the account
+        else:
+            # Query database from users table for cash and declare variable to hold cash and username
+            rows = db.execute("SELECT * FROM users WHERE id = :id", id=userid)
+            user_cash = rows[0]["cash"]
+            user_name = rows[0]["username"]
+
+            # If user has enough cash, INSERT  new data into the "transaction" table and UPDATE "cash" in the "users" table
+            if user_cash >= stock_price * total_shares:
+                db.execute("INSERT INTO history (username, symbol, shares, price, date, cost) VALUES(:name, :symbol, :shares, :price, :date, :cost)",
+                            name=user_name,
+                            symbol=stock_symbol,
+                            shares=total_shares,
+                            price=stock_price,
+                            date=datetime.datetime.now(),
+                            cost=stock_price * total_shares)
+
+                # Update the "symbol", "shares", "price", "total_value", "cash" in the "users" table
+                user_cash -= total_shares * stock_price
+                db.execute("UPDATE users SET cash = :cash WHERE id = :id", cash=user_cash, id=userid)
+
+        return render_template("bought.html", symbol=stock_symbol,
+                                        name=user_name,
+                                        shares=total_shares,
+                                        price=stock_price,
+                                        total=stock_price * total_shares,
+                                        cash=usd(user_cash))
 
 
 # @app.route("/history")
@@ -108,8 +180,19 @@ def login():
 @login_required
 def quote():
     """Get stock quote."""
+    # User reached route via GET (as by clicking a link or via redirect)
+    if request.method == "GET":
+        return render_template("quote.html")
 
-
+    else:
+        # Check for valid symbol and render quoted.html to display stock price
+        # Otherwise, return apology
+        quote_dict = lookup(request.form.get("quote"))
+        if not quote_dict:
+            return apology("incorrect symbol", 403)
+            return redirect("/quote")
+        else:
+            return render_template("quoted.html", name=quote_dict["name"], symbol=quote_dict["symbol"], price=quote_dict["price"])
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -118,6 +201,7 @@ def register():
     # User reached route via GET (as by clicking a link or via redirect)
     if request.method == "GET":
         return render_template("register.html")
+
     else:
         # Ensure username was submitted
         if not request.form.get("username"):
@@ -145,11 +229,12 @@ def register():
             return apology("username already exists", 403)
             return redirect("/register")
 
-# @app.route("/sell", methods=["GET", "POST"])
-# @login_required
-# def sell():
-#     """Sell shares of stock"""
-#     return apology("TODO")
+@app.route("/sell", methods=["GET", "POST"])
+@login_required
+def sell():
+    """Sell shares of stock"""
+    if request.method == 'GET':
+        return render_template("sell.html")
 
 
 # def errorhandler(e):
